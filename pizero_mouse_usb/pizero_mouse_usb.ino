@@ -47,17 +47,23 @@ THIS CODE IS ALSO BASED ON:
 
 /*
  * Compile it on arduino using this toolchain: https://github.com/earlephilhower/arduino-pico
+ * Library Used: Adafruit TinyUSB Library, Pico PIO USB, RPI_PICO_Timerinterrupt
+ *
+ * WARNING! Pico Pio USB shall be version 0.5.3, version 0.6.0 has a bug and is not working.
+ *
  * config in Tools-> CPU Speed: 120Mhz
  *           Tools-> USB Stack: Adafruit TinyUSB
- 
  */
 
-// USBHost is defined in usbh_helper.h
-#define PIN_USB_HOST_DP  11
-//#define PIN_5V_EN        6
-//#define PIN_5V_EN_STATE  1
-#include "usbh_helper.h"
+// pio-usb is required for rp2040 host
+#define HOST_PIN_DP   11   // Pin used as D+ for host, D- = D+ + 1
+#include "pio_usb.h"
 
+#include "Adafruit_TinyUSB.h"
+// USB Host object
+Adafruit_USBH_Host USBHost;
+// holding device descriptor
+tusb_desc_device_t desc_device;
 
 volatile int8_t mouseDirectionX = 0;    // X direction (0 = decrement, 1 = increment)
 volatile int8_t mouseEncoderPhaseX = 0; // X Quadrature phase (0-3)
@@ -80,13 +86,6 @@ volatile int16_t mouseDistanceY = 0; // Distance left for mouse to move
 
 static bool config;
 
-#if defined(ARDUINO_ARCH_RP2040)
-//--------------------------------------------------------------------+
-// For RP2040 use both core0 for device stack, core1 for host stack
-//--------------------------------------------------------------------+
-
-
-
 // Can be included as many times as necessary, without `Multiple Definitions` Linker Error
 #include "RPi_Pico_TimerInterrupt.h"
 
@@ -99,7 +98,6 @@ RPI_PICO_ISR_Timer ISR_timer;
 
 struct repeating_timer timer1;
 
-//------------- Core0 -------------//
 
 bool timer1_callback(struct repeating_timer *t)
 {
@@ -173,6 +171,8 @@ bool timer1_callback(struct repeating_timer *t)
   return true;
 }
 
+//------------- Core0 -------------//
+
 void setup() {
   //mice buttons
   pinMode(27, OUTPUT);
@@ -200,11 +200,11 @@ void setup() {
   digitalWrite(JOY_F_PIN,0);
 
   // CFG switch
-  pinMode(0, INPUT);
+  pinMode(0, INPUT_PULLUP);
 
   Serial.begin(115200);
   //while ( !Serial ) delay(10);   // wait for native usb
-  Serial.println("USB Mouse to BusMouse/Joystick Adapter, (C) A.Alea 2024 V0.1");
+  Serial.println("USB Mouse to BusMouse/Joystick Adapter, (C) A.Alea 2024 V0.2");
 
   if (ITimer1.attachInterruptInterval(TIMER_INTERVAL_MS * 1000, timer1_callback))
     {
@@ -232,9 +232,34 @@ void loop() {
 }
 
 //------------- Core1 -------------//
+
 void setup1() {
-  // configure pio-usb: defined in usbh_helper.h
-  rp2040_configure_pio_usb();
+  //while ( !Serial ) delay(10);   // wait for native usb
+  Serial.println("Core1 setup to run TinyUSB host with pio-usb");
+
+  // Check for CPU frequency, must be multiple of 120Mhz for bit-banging USB
+  uint32_t cpu_hz = clock_get_hz(clk_sys);
+  if ( cpu_hz != 120000000UL && cpu_hz != 240000000UL ) {
+    while ( !Serial ) delay(10);   // wait for native usb
+    Serial.printf("Error: CPU Clock = %u, PIO USB require CPU clock must be multiple of 120 Mhz\r\n", cpu_hz);
+    Serial.printf("Change your CPU Clock to either 120 or 240 Mhz in Menu->CPU Speed \r\n", cpu_hz);
+    while(1) delay(1);
+  }
+
+  pio_usb_configuration_t pio_cfg = PIO_USB_DEFAULT_CONFIG;
+  pio_cfg.pin_dp = HOST_PIN_DP;
+ 
+ #if defined(ARDUINO_RASPBERRY_PI_PICO_W)
+  /* https://github.com/sekigon-gonnoc/Pico-PIO-USB/issues/46 */
+  pio_cfg.sm_tx      = 3;
+  pio_cfg.sm_rx      = 2;
+  pio_cfg.sm_eop     = 3;
+  pio_cfg.pio_rx_num = 0;
+  pio_cfg.pio_tx_num = 1;
+  pio_cfg.tx_ch      = 9;
+ #endif /* ARDUINO_RASPBERRY_PI_PICO_W */
+ 
+  USBHost.configure_pio_usb(1, &pio_cfg);
 
   // run host stack on controller (rhport) 1
   // Note: For rp2040 pico-pio-usb, calling USBHost.begin() on core1 will have most of the
@@ -246,55 +271,85 @@ void loop1() {
   USBHost.task();
 }
 
-#endif
-
-extern "C" {
+//--------------------------------------------------------------------+
+// Host HID
+//--------------------------------------------------------------------+
 
 // Invoked when device with hid interface is mounted
-// Report descriptor is also available for use.
-// tuh_hid_parse_report_descriptor() can be used to parse common/simple enough
-// descriptor. Note: if report descriptor length > CFG_TUH_ENUMERATION_BUFSIZE,
-// it will be skipped therefore report_desc = NULL, desc_len = 0
-void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *desc_report, uint16_t desc_len) {
-  (void) desc_report;
-  (void) desc_len;
+// Report descriptor is also available for use. tuh_hid_parse_report_descriptor()
+// can be used to parse common/simple enough descriptor.
+// Note: if report descriptor length > CFG_TUH_ENUMERATION_BUFSIZE, it will be skipped
+// therefore report_desc = NULL, desc_len = 0
+void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_report, uint16_t desc_len)
+{
+  (void)desc_report;
+  (void)desc_len;
+
+  // Interface protocol (hid_interface_protocol_enum_t)
+  const char* protocol_str[] = { "None", "Keyboard", "Mouse" };
+  uint8_t const itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
+
   uint16_t vid, pid;
   tuh_vid_pid_get(dev_addr, &vid, &pid);
 
-  Serial.printf("HID device address = %d, instance = %d is mounted\r\n", dev_addr, instance);
-  Serial.printf("VID = %04x, PID = %04x\r\n", vid, pid);
-  if (!tuh_hid_receive_report(dev_addr, instance)) {
-    Serial.printf("Error: cannot request to receive report\r\n");
+  Serial.printf( "[%04x:%04x][%u] HID Interface%u, Protocol = %s\r\n", vid, pid, dev_addr, instance, protocol_str[itf_protocol]);
+
+  // Receive report from mouse only
+  // tuh_hid_report_received_cb() will be invoked when report is available
+  if (itf_protocol == HID_ITF_PROTOCOL_MOUSE)
+  {
+    if ( !tuh_hid_receive_report(dev_addr, instance) )
+    {
+      Serial.printf("Error: cannot request report\r\n");
+    }
   }
 }
 
 // Invoked when device with hid interface is un-mounted
-void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
-  Serial.printf("HID device address = %d, instance = %d is unmounted\r\n", dev_addr, instance);
+void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance)
+{
+ Serial.printf("[%u] HID Interface%u is unmounted\r\n", dev_addr, instance);
+}
+
+static void process_mouse_report(uint8_t dev_addr, hid_mouse_report_t const * report)
+{
+  char l = report->buttons & MOUSE_BUTTON_LEFT   ? 'L' : '-';
+  char m = report->buttons & MOUSE_BUTTON_MIDDLE ? 'M' : '-';
+  char r = report->buttons & MOUSE_BUTTON_RIGHT  ? 'R' : '-';
+  Serial.printf( "[%u] %c%c%c %d %d %d\r\n", dev_addr, l, m, r, report->x, report->y, report->wheel);
+  
+  mouseDistanceX += report->x;
+  mouseDistanceY += report->y;
+  if (config){ //mice
+    digitalWrite(27,(report->buttons & MOUSE_BUTTON_LEFT  ) ? 0:1);//left button
+    digitalWrite(28,(report->buttons & MOUSE_BUTTON_RIGHT ) ? 0:1);//right button
+    digitalWrite(29,(report->buttons & MOUSE_BUTTON_MIDDLE) ? 0:1);//central button
+  } else { //joystick or 1 button mouse
+    digitalWrite(JOY_F_PIN,(report->buttons & (MOUSE_BUTTON_RIGHT|MOUSE_BUTTON_MIDDLE|MOUSE_BUTTON_LEFT)) ? 1:0); // Any button
+  }
 }
 
 // Invoked when received report from device via interrupt endpoint
-void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const *report, uint16_t len) {
-  Serial.printf("HIDreport : ");
-  for (uint16_t i = 0; i < len; i++) {
-    Serial.printf("0x%02X ", report[i]);
+void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* report, uint16_t len)
+{
+  (void) len;
+  uint8_t const itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
+
+  switch(itf_protocol)
+  {
+    case HID_ITF_PROTOCOL_MOUSE:
+      process_mouse_report(dev_addr, (hid_mouse_report_t const*) report );
+    break;
+
+    default: break;
   }
-  Serial.println();
-  if (len==3){
-      mouseDistanceX+=(int8_t)report[1];
-      mouseDistanceY+=(int8_t)report[2];
-    if (config){ //mice
-      digitalWrite(27,(report[0]&0x1)?0:1);//left button
-      digitalWrite(28,(report[0]&0x2)?0:1); //right button
-      digitalWrite(29,(report[0]&0x4)?0:1);//central button
-    } else { //joystick or 1 button mouse
-      digitalWrite(JOY_F_PIN,(report[0]!=0)?1:0); // Any button
-    }
-  }
+
   // continue to request to receive report
-  if (!tuh_hid_receive_report(dev_addr, instance)) {
-    Serial.printf("Error: cannot request to receive report\r\n");
+  if ( !tuh_hid_receive_report(dev_addr, instance) )
+  {
+    Serial.printf("Error: cannot request report\r\n");
   }
 }
 
-} // extern C
+
+
