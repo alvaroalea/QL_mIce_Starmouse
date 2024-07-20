@@ -16,17 +16,19 @@ My work is only copy the design to Kicad, all (C) are retaing to the original ow
 
 ICE was a early graphic enviroment for the Sinclair QL, it was distributed in ROM Cartridge format, version 1 use keys, but version 2 incorporate a mouse for manage the enviroment.
 
-This project Clone the hardware board that have a socket for a ROM chip, with ICE, and the circuit to manage te mouse, This Board has been design to match 1:1 the pictures I found of the original board, so can schematic and board can be usefull to repair the original Cartridge.
+This project clone the hardware board that have a socket for a ROM chip with ICE, and the circuit to manage te mouse, This Board has been design to match 1:1 the pictures I found of the original board, so can schematic and board can be usefull to repair the original Cartridge.
 
-Original use a bus-mouse, a early kind of no-smart mouse where the signal of the encoders in X and Y are passed to the host computer, this kind of mouse area also used by BBC, Spectrum, Comodore Amiga, Atari ST and early PC XT, today is almost imposible to got one, so I add a second board, using a raspberry pi pico microcontroller that emulate this kind of mouses with a standard USB mouse. This board can also be used on other computer with the adecate wiring.
+Original use a bus-mouse, a early kind of no-smart mouse where the signal of the encoders in X and Y are passed to the host computer, this kind of mouse area also used by BBC, Spectrum, Comodore Amiga, Atari ST and early PC XT, today is almost imposible to got one, so I add a second board, using a raspberry pi pico microcontroller that emulate this kind of mouses with a standard USB mouse. This board can also be used on other computers with the adecuate wiring.
 
 A Spanish Company develop another mouse interface for the QL, Starmouse, this interface emulate key push using the second Joystick port (that is also used for the F1-F5 keys) and got power from the cartridge port. This second board can also allow to emulate this mouse. if you connect the adecuate cable to the joystick port.
 
 A small switch in the board will allow you to select, even on they fly, which mouse emulate.
 
-Also included a PDF with a sticker and a 3D model to print a case for this interface.
+in the folder case there is a PDF with a sticker and a 3D model to print a case for this interface.
 
-There is also the program of the firmware to install on the raspberry pi pico. you should use a "waveshare RP-2024 Zero""
+in the folder pizero_mouse_usb you can found the source code and binery (.UF2 file) of the firmware to install on the raspberry pi pico. you should use a "waveshare RP-2024 Zero"
+
+in the folder gerber_to_order you can found .zip files ready to send to the mains PCB manufacturers (this is automatic generated, not checked, you should do by yourself)
 
 # Technical Information
 
