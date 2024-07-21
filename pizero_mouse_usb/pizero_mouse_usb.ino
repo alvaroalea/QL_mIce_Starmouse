@@ -65,6 +65,8 @@ Adafruit_USBH_Host USBHost;
 // holding device descriptor
 tusb_desc_device_t desc_device;
 
+//#include <Adafruit_NeoPixel.h>
+
 volatile int8_t mouseDirectionX = 0;    // X direction (0 = decrement, 1 = increment)
 volatile int8_t mouseEncoderPhaseX = 0; // X Quadrature phase (0-3)
 
@@ -78,13 +80,20 @@ volatile int16_t mouseDistanceY = 0; // Distance left for mouse to move
 #define XB_PIN 26
 #define YA_PIN 15
 #define YB_PIN 14
+#define LMB_PIN 27
+#define RMB_PIN 28
+#define CMB_PIN 29
 #define JOY_F_PIN 1
 #define JOY_U_PIN 2
 #define JOY_D_PIN 3
 #define JOY_R_PIN 4
 #define JOY_L_PIN 5
+#define SWITCH_PIN 0
+#define NEOPIXEL 16
 
-static bool config;
+//Adafruit_NeoPixel pixels(1, NEOPIXEL, NEO_GRB + NEO_KHZ800);
+
+static bool config=0;
 
 // Can be included as many times as necessary, without `Multiple Definitions` Linker Error
 #include "RPi_Pico_TimerInterrupt.h"
@@ -97,6 +106,7 @@ RPI_PICO_Timer ITimer1(1);
 RPI_PICO_ISR_Timer ISR_timer;
 
 struct repeating_timer timer1;
+
 
 
 bool timer1_callback(struct repeating_timer *t)
@@ -175,12 +185,12 @@ bool timer1_callback(struct repeating_timer *t)
 
 void setup() {
   //mice buttons
-  pinMode(27, OUTPUT);
-  pinMode(28, OUTPUT);
-  pinMode(29, OUTPUT);
-  digitalWrite(27,1);//left button, buttons are inverted
-  digitalWrite(28,1); //right button
-  digitalWrite(29,1);//central button
+  pinMode(LMB_PIN, OUTPUT);
+  pinMode(RMB_PIN, OUTPUT);
+  pinMode(CMB_PIN, OUTPUT);
+  digitalWrite(LMB_PIN,1);//left button, buttons are inverted
+  digitalWrite(RMB_PIN,1); //right button
+  digitalWrite(CMB_PIN,1);//central button
 
   //mice xy
   pinMode(XA_PIN, OUTPUT);
@@ -200,7 +210,7 @@ void setup() {
   digitalWrite(JOY_F_PIN,0);
 
   // CFG switch
-  pinMode(0, INPUT_PULLUP);
+  pinMode(SWITCH_PIN, INPUT_PULLUP);
 
   Serial.begin(115200);
   //while ( !Serial ) delay(10);   // wait for native usb
@@ -212,14 +222,26 @@ void setup() {
     } else {
       Serial.println(F("Can't set ITimer1. Select another freq. or timer"));
     }
+  
+  //pixels.begin(); // INITIALIZE NeoPixel strip object (REQUIRED)
+  //pixels.setPixelColor(0, pixels.Color(128, 0, 0));
+  //pixels.show(); 
+  Serial.println("Core0 End Setup");
+
+
 }
 
 void loop() {
+  //Serial.printf("0 Es %i\n",digitalRead(0));
   Serial.flush();
   bool oldcfg = config;
-  config=digitalRead(0);
+  config=digitalRead(SWITCH_PIN);
   if (oldcfg!=config) {
-    if (config==0) Serial.println("CONFIG: Joystick Emulation");
+    if (config==0) {
+        Serial.println("CONFIG: Joystick Emulation");
+        //pixels.setPixelColor(0, pixels.Color(128, 0, 0));
+        //pixels.show(); 
+    }
     if (config==1) {
         Serial.println("CONFIG: mICE Mouse");
         digitalWrite(JOY_L_PIN,0);
@@ -227,6 +249,8 @@ void loop() {
         digitalWrite(JOY_D_PIN,0);
         digitalWrite(JOY_U_PIN,0);
         digitalWrite(JOY_F_PIN,0);
+        //pixels.setPixelColor(0, pixels.Color(0, 128, 0));
+        //pixels.show(); 
     }
   }
 }
@@ -321,9 +345,9 @@ static void process_mouse_report(uint8_t dev_addr, hid_mouse_report_t const * re
   mouseDistanceX += report->x;
   mouseDistanceY += report->y;
   if (config){ //mice
-    digitalWrite(27,(report->buttons & MOUSE_BUTTON_LEFT  ) ? 0:1);//left button
-    digitalWrite(28,(report->buttons & MOUSE_BUTTON_RIGHT ) ? 0:1);//right button
-    digitalWrite(29,(report->buttons & MOUSE_BUTTON_MIDDLE) ? 0:1);//central button
+    digitalWrite(LMB_PIN,(report->buttons & MOUSE_BUTTON_LEFT  ) ? 0:1);//left button
+    digitalWrite(RMB_PIN,(report->buttons & MOUSE_BUTTON_RIGHT ) ? 0:1);//right button
+    digitalWrite(CMB_PIN,(report->buttons & MOUSE_BUTTON_MIDDLE) ? 0:1);//central button
   } else { //joystick or 1 button mouse
     digitalWrite(JOY_F_PIN,(report->buttons & (MOUSE_BUTTON_RIGHT|MOUSE_BUTTON_MIDDLE|MOUSE_BUTTON_LEFT)) ? 1:0); // Any button
   }

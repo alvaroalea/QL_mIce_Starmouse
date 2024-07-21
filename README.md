@@ -1,8 +1,6 @@
 # QL_mIce_Starmouse
 Mouse Interface for sinclair QL, mIce and Starmouse compatible
 
-# NO WORKING YET
-
 Reverse Engineered and adapted in 2024 by Alvaro Alea Fernandez
 
 License under: CERN Open Hardware Licence Version 2 - Strongly Reciprocal
